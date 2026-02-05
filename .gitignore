@@ -1,0 +1,29 @@
+# Derlenmiş dosyalar
+bin/
+*.class
+
+# Eclipse IDE ayarları
+.settings/
+.classpath
+.project
+
+# Konfigürasyon (hassas bilgiler içeriyor)
+config.properties
+
+# Güncelleme notları (sunucu bilgileri içeriyor)
+GUNCELLEME_NOTLARI.txt
+
+# JavaFX SDK (herkes kendi indirir)
+javafx-sdk-21.0.7/
+
+# İş verileri
+*.csv
+*.xlsx
+
+# Geçici dosyalar
+*.tmp
+*.bak
+*.log
+
+# To-Do listesi (kişisel)
+2DoList.txt

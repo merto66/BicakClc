@@ -1,0 +1,2 @@
+Main-Class: com.bicakclc.main.BicakClcApplication
+Class-Path: lib/*
