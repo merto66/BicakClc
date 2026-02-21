@@ -6,6 +6,7 @@ import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.sql.Connection;
 import java.time.format.DateTimeFormatter;
@@ -247,7 +248,7 @@ public class InvoiceViewPanel extends JPanel {
                 invoice.getCompanyName(),
                 invoice.getQuality(),
                 formattedDate,
-                String.format("%.2f TL", invoice.getTotalAmount()),
+                String.format("%.2f TL", getDisplayedInvoiceTotal(invoice)),
                 String.format("%.2f TL", invoice.getDiscountAmount()),
                 String.format("%.2f TL", invoice.getFinalAmount()),
                 invoice.getStatus()
@@ -322,14 +323,11 @@ public class InvoiceViewPanel extends JPanel {
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
             infoPanel.add(new JLabel(invoice.getInvoiceDate().format(formatter)), gbc);
             
-            // Items table
-            String[] columnNames = {"Sıra", "Ürün Adı", "Fiyat", "CM", "Adet", "Toplam"};
+            String[] columnNames = {"Sıra", "Ürün Adı", "Fiyat", "CM", "Adet", "İşçilik", "Toplam"};
             DefaultTableModel itemsModel = new DefaultTableModel(columnNames, 0);
             
-            // Ana gruplar için sıra numarasını yeniden hesapla
             int mainGroupSeq = 0;
             for (InvoiceItem item : items) {
-                // Find product name
                 String productName = "";
                 for (Product product : productList) {
                     if (product.getProductId() == item.getProductId()) {
@@ -338,7 +336,6 @@ public class InvoiceViewPanel extends JPanel {
                     }
                 }
                 
-                // Alt gruplar için sıra numarasını boş göster, ana gruplar için sıralı numara ver
                 Object rowNumberToShow;
                 if (item.isSubGroup()) {
                     rowNumberToShow = "";
@@ -353,7 +350,8 @@ public class InvoiceViewPanel extends JPanel {
                     String.format("%.2f TL", item.getPrice()),
                     item.getCmValue() != null ? item.getCmValue().toString() : "",
                     item.getQuantity(),
-                    String.format("%.2f TL", item.getTotal())
+                    item.getLaborCost() != null ? String.format("%.2f TL", item.getLaborCost()) : "0.00 TL",
+                    String.format("%.2f TL", getDisplayedItemTotal(item))
                 });
             }
             
@@ -369,7 +367,7 @@ public class InvoiceViewPanel extends JPanel {
             gbc2.gridx = 0; gbc2.gridy = 0;
             totalsPanel.add(new JLabel("Toplam Tutar:"), gbc2);
             gbc2.gridx = 1;
-            totalsPanel.add(new JLabel(String.format("%.2f TL", invoice.getTotalAmount())), gbc2);
+            totalsPanel.add(new JLabel(String.format("%.2f TL", getDisplayedInvoiceTotal(invoice))), gbc2);
             
             gbc2.gridx = 0; gbc2.gridy = 1;
             totalsPanel.add(new JLabel("İskonto:"), gbc2);
@@ -384,7 +382,7 @@ public class InvoiceViewPanel extends JPanel {
             detailsFinalAmountLabel.setFont(new Font("Arial", Font.BOLD, 14));
             totalsPanel.add(detailsFinalAmountLabel, gbc2);
 
-            // Toplam Adet
+            // Total Quantity
             gbc2.gridx = 0; gbc2.gridy = 3;
             totalsPanel.add(new JLabel("Toplam Adet:"), gbc2);
             gbc2.gridx = 1;
@@ -480,7 +478,7 @@ public class InvoiceViewPanel extends JPanel {
                         }
                     }
                 }
-                // Otomatik sütun genişliği
+                // Auto column width
                 for (int i = 0; i < invoiceTable.getColumnCount(); i++) {
                     sheet.autoSizeColumn(i);
                 }
@@ -505,9 +503,9 @@ public class InvoiceViewPanel extends JPanel {
                  Workbook workbook = WorkbookFactory.create(templateStream);
                  java.io.FileOutputStream fos = new java.io.FileOutputStream(fileToSave)) {
 
-                // Template'in ilk sheet'ini kullan (named range'ler zaten doğru sheet'i işaret eder)
+                // Use the template's first sheet (named ranges already point to the correct sheet)
                 org.apache.poi.ss.usermodel.Sheet sheet = workbook.getSheetAt(0);
-                // Stiller
+                // Styles
                 org.apache.poi.ss.usermodel.CellStyle boldStyle = workbook.createCellStyle();
                 org.apache.poi.ss.usermodel.Font boldFont = workbook.createFont();
                 boldFont.setBold(true);
@@ -541,22 +539,28 @@ public class InvoiceViewPanel extends JPanel {
                 normalStyle.setBorderLeft(org.apache.poi.ss.usermodel.BorderStyle.THIN);
                 normalStyle.setBorderRight(org.apache.poi.ss.usermodel.BorderStyle.THIN);
 
-                // ===== Named range ile üst bilgiler =====
-                // Gerekli named range'ler:
+                // Borderless style for summary block (to match template appearance)
+                org.apache.poi.ss.usermodel.CellStyle summaryLabelStyle = workbook.createCellStyle();
+                org.apache.poi.ss.usermodel.CellStyle summaryValueStyle = workbook.createCellStyle();
+                summaryValueStyle.setDataFormat(workbook.createDataFormat().getFormat("#,##0.00 TL"));
+                summaryValueStyle.setAlignment(org.apache.poi.ss.usermodel.HorizontalAlignment.RIGHT);
+
+                // ===== Header info via named ranges =====
+                // Required named ranges:
                 // - InvoiceNumberCell, CompanyNameCell, QualityCell, DateCell
-                // - ItemsStartCell (tablonun ilk satırının ilk hücresi, örn A12)
+                // - ItemsStartCell (first cell of table's first row, e.g. A12)
                 // - TotalAmountCell, DiscountCell, FinalAmountCell, TotalQtyCell
 
                 java.time.format.DateTimeFormatter dtf = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm");
 
-                // Named range'ler yoksa kullanıcıya eksikleri gösterip çık
+                // If named ranges are missing, show user and exit
                 java.util.List<String> missingNames = new java.util.ArrayList<>();
                 if (!setNamedCellString(workbook, "InvoiceNumberCell", invoice.getInvoiceNumber())) missingNames.add("InvoiceNumberCell");
                 if (!setNamedCellString(workbook, "CompanyNameCell", invoice.getCompanyName())) missingNames.add("CompanyNameCell");
                 if (!setNamedCellString(workbook, "QualityCell", invoice.getQuality())) missingNames.add("QualityCell");
                 if (!setNamedCellString(workbook, "DateCell", invoice.getInvoiceDate() != null ? invoice.getInvoiceDate().format(dtf) : "")) missingNames.add("DateCell");
 
-                // Üst bilgi alanları eksikse daha ileri gitme (NPE ve yanlış dosya üretimini engelle)
+                // If header fields are missing, do not proceed (prevents NPE and wrong file output)
                 if (!missingNames.isEmpty()) {
                     StringBuilder sb = new StringBuilder();
                     sb.append("Template içinde gerekli named range'ler bulunamadı:\n\n");
@@ -568,28 +572,19 @@ public class InvoiceViewPanel extends JPanel {
                     return;
                 }
 
-                // Adım 1: Her satırın toplamını hesapla (önce DB'den gelen total'a güven, yoksa price*adet*(cm) hesapla)
+                // Step 1: Calculate each row total (trust DB total first, otherwise calculate price*qty*(cm))
                 java.util.Map<Integer, java.math.BigDecimal> itemCalculatedTotals = new java.util.HashMap<>();
                 for (InvoiceItem item : items) {
                     if (item.getItemId() == null) {
                         continue;
                     }
 
-                    java.math.BigDecimal calculatedTotal = java.math.BigDecimal.ZERO;
-                    if (item.getTotal() != null) {
-                        calculatedTotal = item.getTotal();
-                    } else if (item.getPrice() != null && item.getQuantity() != null) {
-                        calculatedTotal = item.getPrice().multiply(java.math.BigDecimal.valueOf(item.getQuantity()));
-                        if (item.getCmValue() != null) {
-                            calculatedTotal = calculatedTotal.multiply(item.getCmValue());
-                        }
-                    }
-
+                    java.math.BigDecimal calculatedTotal = getDisplayedItemTotal(item);
                     itemCalculatedTotals.put(item.getItemId(), calculatedTotal);
                 }
 
-                // Adım 2: Excel'deki sıra mantığıyla grup toplamını hesapla
-                // Kural: Bir ana grup satırından sonra gelen alt satırlar, bir sonraki ana gruba kadar o gruba aittir.
+                // Step 2: Calculate group total with Excel row order logic
+                // Rule: Sub-rows following a main group row belong to that group until the next main group.
                 java.util.Map<Integer, java.math.BigDecimal> mainGroupTotals = new java.util.HashMap<>();
                 Integer currentMainItemId = null;
                 java.math.BigDecimal runningGroupTotal = java.math.BigDecimal.ZERO;
@@ -602,26 +597,26 @@ public class InvoiceViewPanel extends JPanel {
                     java.math.BigDecimal rowTotal = itemCalculatedTotals.getOrDefault(item.getItemId(), java.math.BigDecimal.ZERO);
 
                     if (!item.isSubGroup()) {
-                        // Yeni ana grup başladı: önce önceki grubun toplamını kaydet
+                        // New main group started: first save previous group total
                         if (currentMainItemId != null) {
                             mainGroupTotals.put(currentMainItemId, runningGroupTotal);
                         }
                         currentMainItemId = item.getItemId();
                         runningGroupTotal = rowTotal;
                     } else {
-                        // Alt grup: en son görülen ana gruba ekle
+                        // Sub-group: add to the last seen main group
                         if (currentMainItemId != null) {
                             runningGroupTotal = runningGroupTotal.add(rowTotal);
                         }
                     }
                 }
 
-                // Son grubu kaydet
+                // Save last group
                 if (currentMainItemId != null) {
                     mainGroupTotals.put(currentMainItemId, runningGroupTotal);
                 }
                 
-                // ===== Named range ile tablo başlangıcı =====
+                // ===== Table start via named range =====
                 Cell itemsStart = getNamedCell(workbook, "ItemsStartCell");
                 if (itemsStart == null) {
                     missingNames.add("ItemsStartCell");
@@ -637,9 +632,9 @@ public class InvoiceViewPanel extends JPanel {
                 int startRow = itemsStart.getRowIndex();
                 int startCol = itemsStart.getColumnIndex();
 
-                // Header satırını (ItemsStartCell'in bir üst satırı) export sırasında garanti altına al
-                // Kolonlar: Sıra, Ürün Adı, CM, Adet, Birim Fiyat, Toplam
-                // NOT: Template'te header zaten varsa EZMEYELİM. Sadece boşsa yaz.
+                // Ensure header row (one row above ItemsStartCell) during export
+                // Columns: Seq, Product Name, CM, Qty, Unit Price, Total
+                // NOTE: If header already exists in template, do not overwrite. Only write if empty.
                 int headerRowIdx = Math.max(0, startRow - 1);
                 Row headerRow = sheet.getRow(headerRowIdx);
                 if (headerRow == null) headerRow = sheet.createRow(headerRowIdx);
@@ -660,34 +655,43 @@ public class InvoiceViewPanel extends JPanel {
                     }
                 }
 
-                // Footer hücrelerinin en üst satırını bul (satırları gerekirse aşağı kaydıracağız)
+                // Summary block columns: take from template (before shift); writing will always be to the calculated row
+                int valueCol = startCol + 5;
+                int labelCol = valueCol - 1;
+                Cell totalAmountCellRef = getNamedCell(workbook, "TotalAmountCell");
+                if (totalAmountCellRef != null) {
+                    valueCol = totalAmountCellRef.getColumnIndex();
+                    labelCol = Math.max(0, valueCol - 1);
+                }
+
+                // Find the top row of footer cells (we will shift rows down if needed)
                 int footerTopRow = Integer.MAX_VALUE;
                 footerTopRow = Math.min(footerTopRow, getNamedRowIndex(workbook, "TotalAmountCell"));
                 footerTopRow = Math.min(footerTopRow, getNamedRowIndex(workbook, "DiscountCell"));
                 footerTopRow = Math.min(footerTopRow, getNamedRowIndex(workbook, "FinalAmountCell"));
                 footerTopRow = Math.min(footerTopRow, getNamedRowIndex(workbook, "TotalQtyCell"));
                 if (footerTopRow == Integer.MAX_VALUE) {
-                    // Footer named range yoksa, satır kaydırma yapma (template sabit satır sayısı varsayılır)
+                    // If footer named range is missing, do not shift rows (template assumed to have fixed row count)
                     footerTopRow = startRow + 9999;
                 }
 
-                // Template'te footer yukarıdaysa ve satır sayısı taşacaksa, footer'ı aşağı kaydır
+                // If footer is above in template and row count would overflow, shift footer down
                 int requiredEndRowExclusive = startRow + Math.max(items.size(), 1);
                 if (requiredEndRowExclusive >= footerTopRow) {
                     int delta = (requiredEndRowExclusive - footerTopRow) + 1;
                     sheet.shiftRows(footerTopRow, sheet.getLastRowNum(), delta, true, false);
-                    // shiftRows named range referanslarını otomatik güncellemeyebilir; footer hücrelerini de kaydır
+                    // shiftRows may not auto-update named range refs; shift footer cells too
                     shiftNamedCellRowIfNeeded(workbook, "TotalAmountCell", footerTopRow, delta);
                     shiftNamedCellRowIfNeeded(workbook, "DiscountCell", footerTopRow, delta);
                     shiftNamedCellRowIfNeeded(workbook, "FinalAmountCell", footerTopRow, delta);
                     shiftNamedCellRowIfNeeded(workbook, "TotalQtyCell", footerTopRow, delta);
                 }
 
-                // Fatura kalemleri - Tüm öğeleri göster (ana grup + alt gruplar)
+                // Invoice line items - show all items (main group + sub-groups)
                 int mainGroupSeq = 1;
                 for (int idx = 0; idx < items.size(); idx++) {
                     InvoiceItem item = items.get(idx);
-                    // Ürün adı boşsa productList'ten bul
+                    // If product name is empty, find from productList
                     if (item.getProductName() == null || item.getProductName().isEmpty()) {
                         for (Product p : productList) {
                             if (p.getProductId() == item.getProductId()) {
@@ -703,7 +707,7 @@ public class InvoiceViewPanel extends JPanel {
                         itemRow = sheet.createRow(excelRowIdx);
                     }
 
-                    // Sıra numarası: Ana grup için sıra numarası, alt grup için boş
+                    // Row number: sequence number for main group, empty for sub-group
                     if (!item.isSubGroup()) {
                         Cell c = getOrCreateCell(itemRow, startCol + 0);
                         c.setCellValue(mainGroupSeq++);
@@ -714,22 +718,26 @@ public class InvoiceViewPanel extends JPanel {
                         c.setCellStyle(normalStyle);
                     }
 
-                    // Ürün Adı
+                    // Product Name
                     org.apache.poi.ss.usermodel.Cell pnameCell = getOrCreateCell(itemRow, startCol + 1);
                     pnameCell.setCellValue(item.getProductName() != null ? item.getProductName() : "");
                     pnameCell.setCellStyle(normalStyle);
 
-                    // CM: Her ikisinde de göster
+                    // CM: Write value in main group; leave blank in sub-group if 0
                     org.apache.poi.ss.usermodel.Cell cmCell = getOrCreateCell(itemRow, startCol + 2);
-                    cmCell.setCellValue(item.getCmValue() != null ? item.getCmValue().doubleValue() : 0d);
+                    if (item.isSubGroup() && (item.getCmValue() == null || item.getCmValue().compareTo(java.math.BigDecimal.ZERO) == 0)) {
+                        cmCell.setCellValue("");
+                    } else {
+                        cmCell.setCellValue(item.getCmValue() != null ? item.getCmValue().doubleValue() : 0d);
+                    }
                     cmCell.setCellStyle(normalStyle);
 
-                    // Adet: Her ikisinde de göster
+                    // Quantity: Show in both
                     org.apache.poi.ss.usermodel.Cell qtyCell = getOrCreateCell(itemRow, startCol + 3);
                     qtyCell.setCellValue(item.getQuantity() != null ? item.getQuantity() : 0);
                     qtyCell.setCellStyle(normalStyle);
 
-                    // Birim Fiyat: Sadece ana grup satırında yaz (Toplam / Adet)
+                    // Unit Price: Write only on main group row (Total / Qty)
                     org.apache.poi.ss.usermodel.Cell unitPriceCell = getOrCreateCell(itemRow, startCol + 4);
                     if (!item.isSubGroup()) {
                         int qty = item.getQuantity() != null ? item.getQuantity() : 0;
@@ -738,7 +746,7 @@ public class InvoiceViewPanel extends JPanel {
                             rowTotal = itemCalculatedTotals.getOrDefault(item.getItemId(), java.math.BigDecimal.ZERO);
                         }
                         if (qty > 0) {
-                            // 2 ondalık, HALF_UP
+                            // 2 decimals, HALF_UP
                             java.math.BigDecimal unitPrice = rowTotal
                                     .divide(java.math.BigDecimal.valueOf(qty), 2, java.math.RoundingMode.HALF_UP);
                             unitPriceCell.setCellValue(unitPrice.doubleValue());
@@ -752,14 +760,14 @@ public class InvoiceViewPanel extends JPanel {
                         unitPriceCell.setCellStyle(normalStyle);
                     }
 
-                    // Toplam: Ana grup için sıranın toplam fiyatı (ana grup + alt gruplar), alt grup için boş
+                    // Total: For main group the row total (main + sub-groups), empty for sub-group
                     org.apache.poi.ss.usermodel.Cell totalCell = getOrCreateCell(itemRow, startCol + 5);
                     if (!item.isSubGroup()) {
                         java.math.BigDecimal rowTotal = mainGroupTotals.get(item.getItemId());
                         if (rowTotal != null) {
                             totalCell.setCellValue(rowTotal.doubleValue());
                         } else {
-                            // Fallback: Eğer mainGroupTotals'da yoksa, sadece kendi hesaplanmış toplamını kullan
+                            // Fallback: If not in mainGroupTotals, use only its calculated total
                             java.math.BigDecimal calculatedTotal = itemCalculatedTotals.getOrDefault(item.getItemId(), java.math.BigDecimal.ZERO);
                             totalCell.setCellValue(calculatedTotal.doubleValue());
                         }
@@ -769,25 +777,60 @@ public class InvoiceViewPanel extends JPanel {
                         totalCell.setCellStyle(normalStyle);
                     }
                 }
-                // ===== Named range ile alt toplamlar =====
-                if (!setNamedCellNumber(workbook, "TotalAmountCell", invoice.getTotalAmount() != null ? invoice.getTotalAmount().doubleValue() : 0d)) missingNames.add("TotalAmountCell");
-                if (!setNamedCellNumber(workbook, "DiscountCell", invoice.getDiscountAmount() != null ? invoice.getDiscountAmount().doubleValue() : 0d)) missingNames.add("DiscountCell");
-                if (!setNamedCellNumber(workbook, "FinalAmountCell", invoice.getFinalAmount() != null ? invoice.getFinalAmount().doubleValue() : 0d)) missingNames.add("FinalAmountCell");
-                if (!setNamedCellNumber(workbook, "TotalQtyCell", invoice.getTotalQuantity() != null ? invoice.getTotalQuantity() : 0)) missingNames.add("TotalQtyCell");
+                // ===== Summary block: write to calculated row (avoids named range shift) =====
+                int summaryStartRow = startRow + items.size() + 1;
+                java.math.BigDecimal discountAmount = invoice.getDiscountAmount();
+                boolean hasDiscount = discountAmount != null && discountAmount.compareTo(java.math.BigDecimal.ZERO) != 0;
 
-                if (!missingNames.isEmpty()) {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("Template içinde gerekli named range'ler bulunamadı:\n\n");
-                    for (String n : missingNames) sb.append("- ").append(n).append("\n");
-                    sb.append("\nExcel'de hücreyi seçip sol üstteki Name Box'a (formül çubuğunun solundaki kutu) bu adı yazıp Enter'a basarak ekleyebilirsin.\n");
-                    sb.append("\nTemplate'te mevcut named range'ler:\n");
-                    sb.append(listWorkbookNames(workbook));
-                    JOptionPane.showMessageDialog(this, sb.toString(), "Template Named Range Eksik", JOptionPane.WARNING_MESSAGE);
-                    return;
+                // Row 0: Total (summary style: no border, match template)
+                org.apache.poi.ss.usermodel.Row row0 = sheet.getRow(summaryStartRow);
+                if (row0 == null) row0 = sheet.createRow(summaryStartRow);
+                org.apache.poi.ss.usermodel.Cell l0 = getOrCreateCell(row0, labelCol);
+                org.apache.poi.ss.usermodel.Cell v0 = getOrCreateCell(row0, valueCol);
+                l0.setCellStyle(summaryLabelStyle);
+                v0.setCellStyle(summaryValueStyle);
+                if (hasDiscount) {
+                    l0.setCellValue("Toplam:");
+                    v0.setCellValue(getDisplayedInvoiceTotal(invoice).doubleValue());
+                } else {
+                    l0.setCellValue("");
+                    v0.setCellValue("");
                 }
+                // Row 1: Discount
+                org.apache.poi.ss.usermodel.Row row1 = sheet.getRow(summaryStartRow + 1);
+                if (row1 == null) row1 = sheet.createRow(summaryStartRow + 1);
+                org.apache.poi.ss.usermodel.Cell l1 = getOrCreateCell(row1, labelCol);
+                org.apache.poi.ss.usermodel.Cell v1 = getOrCreateCell(row1, valueCol);
+                l1.setCellStyle(summaryLabelStyle);
+                v1.setCellStyle(summaryValueStyle);
+                if (hasDiscount) {
+                    l1.setCellValue("İskonto:");
+                    v1.setCellValue(discountAmount.doubleValue());
+                } else {
+                    l1.setCellValue("");
+                    v1.setCellValue("");
+                }
+                // Row 2: Final Amount
+                org.apache.poi.ss.usermodel.Row row2 = sheet.getRow(summaryStartRow + 2);
+                if (row2 == null) row2 = sheet.createRow(summaryStartRow + 2);
+                org.apache.poi.ss.usermodel.Cell l2 = getOrCreateCell(row2, labelCol);
+                org.apache.poi.ss.usermodel.Cell v2 = getOrCreateCell(row2, valueCol);
+                l2.setCellStyle(summaryLabelStyle);
+                v2.setCellStyle(summaryValueStyle);
+                l2.setCellValue("Son Tutar:");
+                v2.setCellValue(invoice.getFinalAmount() != null ? invoice.getFinalAmount().doubleValue() : 0d);
+                // Row 3: Total Quantity (number, no TL format)
+                org.apache.poi.ss.usermodel.Row row3 = sheet.getRow(summaryStartRow + 3);
+                if (row3 == null) row3 = sheet.createRow(summaryStartRow + 3);
+                org.apache.poi.ss.usermodel.Cell l3 = getOrCreateCell(row3, labelCol);
+                org.apache.poi.ss.usermodel.Cell v3 = getOrCreateCell(row3, valueCol);
+                l3.setCellStyle(summaryLabelStyle);
+                v3.setCellStyle(summaryLabelStyle);
+                l3.setCellValue("Toplam Adet:");
+                v3.setCellValue(invoice.getTotalQuantity() != null ? invoice.getTotalQuantity() : 0);
 
-                // Otomatik sütun genişliği
-                // Template zaten genişlik ayarlı olabilir; yine de tablo kolonlarını autosize yapalım
+                // Auto column width
+                // Template may already have column width; still autosize table columns
                 for (int i = 0; i <= 5; i++) {
                     sheet.autoSizeColumn(startCol + i);
                 }
@@ -801,7 +844,7 @@ public class InvoiceViewPanel extends JPanel {
     }
 
     private InputStream openInvoiceTemplateStream() throws Exception {
-        // 1) Classpath (önerilen): /templates/inovice_template.xlsx
+        // 1) Classpath: /templates/inovice_template.xlsx (if src/resources is on classpath)
         String[] classpathCandidates = new String[] {
                 "/templates/inovice_template.xlsx",
                 "/templates/invoice_template.xlsx",
@@ -812,13 +855,15 @@ public class InvoiceViewPanel extends JPanel {
             if (in != null) return in;
         }
 
-        // 2) Proje içi dosya (IDE'de kolay)
+        // 2) Project file: first try actual path src/resources/templates/
         String[] diskCandidates = new String[] {
+                "src/resources/templates/inovice_template.xlsx",
                 "resources/templates/inovice_template.xlsx",
-                "resources/templates/invoice_template.xlsx",
-                "resources/templates/inovice_temple.xlsx",
                 "src/main/resources/templates/inovice_template.xlsx",
+                "resources/templates/invoice_template.xlsx",
+                "src/resources/templates/invoice_template.xlsx",
                 "src/main/resources/templates/invoice_template.xlsx",
+                "resources/templates/inovice_temple.xlsx",
                 "src/main/resources/templates/inovice_temple.xlsx"
         };
         for (String p : diskCandidates) {
@@ -826,11 +871,31 @@ public class InvoiceViewPanel extends JPanel {
             if (f.exists()) return new FileInputStream(f);
         }
 
-        throw new FileNotFoundException("Template bulunamadı. /templates/... (classpath) veya resources/templates/ ya da src/main/resources/templates/ altında bekleniyor.");
+        throw new FileNotFoundException("Template bulunamadı. src/resources/templates/inovice_template.xlsx veya classpath /templates/ altında bekleniyor.");
+    }
+
+    private BigDecimal getDisplayedInvoiceTotal(Invoice invoice) {
+        BigDecimal totalAmount = invoice != null && invoice.getTotalAmount() != null ? invoice.getTotalAmount() : BigDecimal.ZERO;
+        BigDecimal laborCost = invoice != null && invoice.getLaborCostAmount() != null ? invoice.getLaborCostAmount() : BigDecimal.ZERO;
+        return totalAmount.add(laborCost);
+    }
+
+    private BigDecimal getDisplayedItemTotal(InvoiceItem item) {
+        BigDecimal baseTotal = BigDecimal.ZERO;
+        if (item.getTotal() != null) {
+            baseTotal = item.getTotal();
+        } else if (item.getPrice() != null && item.getQuantity() != null) {
+            baseTotal = item.getPrice().multiply(BigDecimal.valueOf(item.getQuantity()));
+            if (item.getCmValue() != null) {
+                baseTotal = baseTotal.multiply(item.getCmValue());
+            }
+        }
+        BigDecimal laborCost = item.getLaborCost() != null ? item.getLaborCost() : BigDecimal.ZERO;
+        return baseTotal.add(laborCost);
     }
 
     private static Cell getNamedCell(Workbook wb, String name) {
-        // Excel'de isimler bazen sheet-scoped olabilir ve büyük/küçük harf farkıyla kayıtlı olabilir.
+        // In Excel, names can be sheet-scoped and may be stored with different case.
         Name nm = null;
         for (Name n : wb.getAllNames()) {
             if (n != null && n.getNameName() != null && n.getNameName().equalsIgnoreCase(name)) {
@@ -850,7 +915,7 @@ public class InvoiceViewPanel extends JPanel {
         if (cr.getSheetName() != null) {
             sh = wb.getSheet(cr.getSheetName());
         }
-        // Sheet adı referansta yoksa (sheet-scoped name), Name içindeki sheetIndex'i kullan
+        // If sheet name is not in reference (sheet-scoped name), use sheetIndex from Name
         if (sh == null && nm.getSheetIndex() >= 0 && nm.getSheetIndex() < wb.getNumberOfSheets()) {
             sh = wb.getSheetAt(nm.getSheetIndex());
         }
@@ -873,6 +938,19 @@ public class InvoiceViewPanel extends JPanel {
         if (c == null) return false;
         c.setCellValue(value != null ? value : "");
         return true;
+    }
+
+    /** Clears the cell to the left of the value cell (e.g. "Total:", "Discount:" label). */
+    private static void clearLabelCellToLeft(Workbook wb, String valueCellName) {
+        Cell valueCell = getNamedCell(wb, valueCellName);
+        if (valueCell == null) return;
+        int col = valueCell.getColumnIndex();
+        if (col > 0) {
+            Row row = valueCell.getRow();
+            Cell labelCell = row.getCell(col - 1);
+            if (labelCell == null) labelCell = row.createCell(col - 1);
+            labelCell.setCellValue("");
+        }
     }
 
     private static boolean setNamedCellNumber(Workbook wb, String name, double value) {

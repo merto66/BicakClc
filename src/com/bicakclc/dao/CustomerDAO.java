@@ -84,6 +84,24 @@ public class CustomerDAO {
         }
         return customers;
     }
+
+    public List<Customer> searchCustomersByCompanyName(String searchTerm, int maxResults) throws SQLException {
+        if (searchTerm == null || searchTerm.trim().isEmpty()) {
+            return new ArrayList<>();
+        }
+        int limit = Math.min(Math.max(1, maxResults), 50);
+        String sql = "SELECT TOP " + limit + " * FROM customers WHERE company_name LIKE ? ORDER BY company_name";
+        List<Customer> customers = new ArrayList<>();
+        try (PreparedStatement stmt = connection.prepareStatement(sql)) {
+            stmt.setString(1, "%" + searchTerm.trim() + "%");
+            try (ResultSet rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    customers.add(mapResultSetToCustomer(rs));
+                }
+            }
+        }
+        return customers;
+    }
     
     public void updateCustomer(Customer customer) throws SQLException {
         String sql = "UPDATE customers SET company_name = ?, contact_person = ?, phone = ?, email = ?, address = ?, updated_at = ? WHERE customer_id = ?";

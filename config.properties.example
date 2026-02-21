@@ -1,0 +1,17 @@
+# Copy this file to `config.properties` and edit values.
+# `config.properties` is gitignored to avoid committing secrets.
+
+# SQL Server connection URL.
+# Examples:
+# - Windows Authentication (Integrated Security):
+#   jdbc:sqlserver://YOUR_HOST\\YOUR_INSTANCE;databaseName=YOUR_DB;encrypt=true;trustServerCertificate=true;integratedSecurity=true
+# - SQL Authentication:
+#   jdbc:sqlserver://YOUR_HOST:1433;databaseName=YOUR_DB;encrypt=true;trustServerCertificate=true
+#
+# Set your URL below (placeholder values by default):
+db.url=jdbc:sqlserver://YOUR_HOST\\YOUR_INSTANCE;databaseName=YOUR_DB;encrypt=true;trustServerCertificate=true;integratedSecurity=true
+
+# Optional: if provided, the app will use SQL Authentication (username/password).
+# db.username=YOUR_SQL_USERNAME
+# db.password=YOUR_SQL_PASSWORD
+

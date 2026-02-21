@@ -2,6 +2,8 @@ package com.bicakclc.ui;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 
 import com.bicakclc.model.Category;
 import com.bicakclc.model.Customer;
@@ -16,18 +18,14 @@ import com.bicakclc.service.ProductService;
 import com.bicakclc.util.DatabaseConnection;
 
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.sql.SQLException;
 import java.sql.Connection;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
-import java.util.stream.Collectors;
 
 public class InvoicePanel extends JPanel {
     private InvoiceService invoiceService;
@@ -44,6 +42,7 @@ public class InvoicePanel extends JPanel {
     private JComboBox<String> categoryComboBox;
     private JTextField companyNameField;
     private JTextField qualityField;
+    private JTextField discountPercentageField;
     private JTextField discountField;
     private JTextField laborCostField;
     private JLabel totalAmountLabel;
@@ -52,23 +51,22 @@ public class InvoicePanel extends JPanel {
     private JTextField cmField;
     private JTextField quantityField;
     
-    // Autocomplete components
-    private JComboBox<String> companyNameComboBox;
-    private List<Customer> customerList;
+    private JWindow companyPopup;
+    private JList<Customer> companyList;
+    private DefaultListModel<Customer> companyListModel;
+    private javax.swing.Timer companySearchTimer;
+    private boolean skipNextCompanySearch;
     
-    // Data
     private List<Product> productList;
     private List<Category> categoryList;
     private Invoice currentInvoice;
-    private List<InvoiceItem> invoiceItems;
     
-    private FavoritePanel favoritePanel; // Add this line
+    private FavoritePanel favoritePanel;
     
     public InvoicePanel() {
         setLayout(new BorderLayout());
         initializeServices();
         favoritePanel = new FavoritePanel();
-        // Set up the addToInvoiceListener
         favoritePanel.setAddToInvoiceListener(product -> addProductToInvoice(product));
         initializeComponents();
         loadData();
@@ -211,31 +209,80 @@ public class InvoicePanel extends JPanel {
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
         
-        // Company name with simple search
         gbc.gridx = 0; gbc.gridy = 0;
         formPanel.add(new JLabel("Firma Adı:"), gbc);
-        
         gbc.gridx = 1;
-        JPanel companyPanel = new JPanel(new BorderLayout());
-        companyNameField = new JTextField(15);
-        JButton searchButton = new JButton("Ara");
-        searchButton.setPreferredSize(new Dimension(60, 25));
-        
-        searchButton.addActionListener(e -> searchCompany());
-        
-        // Add Enter key listener for search
-        companyNameField.addKeyListener(new KeyAdapter() {
+        companyNameField = new JTextField(20);
+        companyNameField.setToolTipText("Firma adı yazın, liste otomatik açılır");
+        companyListModel = new DefaultListModel<>();
+        companyList = new JList<>(companyListModel);
+        companyList.setVisibleRowCount(8);
+        companyList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        companyList.setCellRenderer((list, value, index, isSelected, cellHasFocus) -> {
+            JLabel l = new JLabel(value == null ? "" : ((Customer) value).getCompanyName());
+            if (isSelected) {
+                l.setBackground(list.getSelectionBackground());
+                l.setForeground(list.getSelectionForeground());
+                l.setOpaque(true);
+            }
+            return l;
+        });
+        companyList.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
-            public void keyPressed(KeyEvent e) {
-                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
-                    searchCompany();
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getClickCount() >= 1) {
+                    Customer c = companyList.getSelectedValue();
+                    if (c != null) onCompanySelected(c);
                 }
             }
         });
-        
-        companyPanel.add(companyNameField, BorderLayout.CENTER);
-        companyPanel.add(searchButton, BorderLayout.EAST);
-        formPanel.add(companyPanel, gbc);
+        companyList.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+                    Customer c = companyList.getSelectedValue();
+                    if (c != null) onCompanySelected(c);
+                } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+                    hideCompanyPopup();
+                }
+            }
+        });
+        companyPopup = null;
+        companySearchTimer = new javax.swing.Timer(280, null);
+        companySearchTimer.setRepeats(false);
+        companySearchTimer.addActionListener(e -> triggerCompanySearch());
+        companyNameField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) { companySearchTimer.restart(); }
+            @Override
+            public void removeUpdate(DocumentEvent e) { companySearchTimer.restart(); }
+            @Override
+            public void changedUpdate(DocumentEvent e) { companySearchTimer.restart(); }
+        });
+        companyNameField.addKeyListener(new KeyAdapter() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                if (companyPopup == null || !companyPopup.isVisible()) return;
+                if (e.getKeyCode() == KeyEvent.VK_DOWN) {
+                    int i = Math.min(companyList.getSelectedIndex() + 1, companyListModel.getSize() - 1);
+                    if (i >= 0) { companyList.setSelectedIndex(i); companyList.ensureIndexIsVisible(i); }
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_UP) {
+                    int i = Math.max(companyList.getSelectedIndex() - 1, 0);
+                    companyList.setSelectedIndex(i);
+                    companyList.ensureIndexIsVisible(i);
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_ENTER) {
+                    Customer c = companyList.getSelectedValue();
+                    if (c != null) onCompanySelected(c);
+                    e.consume();
+                } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
+                    hideCompanyPopup();
+                    e.consume();
+                }
+            }
+        });
+        formPanel.add(companyNameField, gbc);
         
         // Quality
         gbc.gridx = 0; gbc.gridy = 1;
@@ -287,8 +334,17 @@ public class InvoicePanel extends JPanel {
         laborCostField.setText("0.00");
         totalsPanel.add(laborCostField, gbc2);
         
-        // Discount
+        // Discount Percentage
         gbc2.gridx = 0; gbc2.gridy = 3;
+        totalsPanel.add(new JLabel("İskonto (%):"), gbc2);
+        
+        gbc2.gridx = 1;
+        discountPercentageField = new JTextField(15);
+        discountPercentageField.setText("0");
+        totalsPanel.add(discountPercentageField, gbc2);
+        
+        // Discount Amount
+        gbc2.gridx = 0; gbc2.gridy = 4;
         totalsPanel.add(new JLabel("İskonto Tutarı:"), gbc2);
         
         gbc2.gridx = 1;
@@ -297,7 +353,7 @@ public class InvoicePanel extends JPanel {
         totalsPanel.add(discountField, gbc2);
         
         // Final amount
-        gbc2.gridx = 0; gbc2.gridy = 4;
+        gbc2.gridx = 0; gbc2.gridy = 5;
         totalsPanel.add(new JLabel("Son Tutar:"), gbc2);
         
         gbc2.gridx = 1;
@@ -332,26 +388,26 @@ public class InvoicePanel extends JPanel {
     }
     
     private void createInvoiceTable() {
-        String[] columnNames = {"Sıra", "Ürün Adı", "Kategori", "Fiyat", "CM", "Adet", "Toplam"};
+        String[] columnNames = {"Sıra", "Ürün Adı", "Kategori", "Fiyat", "CM", "Adet", "İşçilik", "Toplam"};
         invoiceTableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                // Fiyat (3), CM (4), Adet (5), Toplam (6) düzenlenebilir
-                return column == 3 || column == 4 || column == 5 || column == 6;
+                if (column == 6) {
+                    Object rowNumber = getValueAt(row, 0);
+                    return rowNumber != null && !rowNumber.toString().isEmpty();
+                }
+                return column == 3 || column == 4 || column == 5 || column == 7;
             }
         };
         invoiceTable = new JTable(invoiceTableModel);
         invoiceTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
-        // Add table model listener for automatic calculation
         invoiceTableModel.addTableModelListener(e -> {
             int row = e.getFirstRow();
             int col = e.getColumn();
             if (row < 0 || col < 0) return;
-            // Eğer toplam dışındaki bir hücre değiştiyse toplamı otomatik güncelle
-            if (col == 3 || col == 4 || col == 5) {
+            if (col == 3 || col == 4 || col == 5 || col == 6) {
                 updateRowTotal(row);
             }
-            // Toplam değişse bile, kullanıcının girdiği değer bırakılır
             calculateTotals();
         });
     }
@@ -360,11 +416,8 @@ public class InvoicePanel extends JPanel {
         try {
             productList = productService.getAllProducts();
             categoryList = categoryService.getAllCategories();
-            customerList = customerService.getAllCustomers();
-            
             updateCategoryComboBox();
             updateProductComboBox();
-            // loadAllCompanyNames() kaldırıldı - artık gerekli değil
             
             newInvoice();
             
@@ -372,7 +425,6 @@ public class InvoicePanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Veri yüklenemedi: " + e.getMessage(), "Hata", JOptionPane.ERROR_MESSAGE);
         }
         
-        // Add listeners
         categoryComboBox.addActionListener(e -> updateProductComboBox());
     }
     
@@ -405,52 +457,73 @@ public class InvoicePanel extends JPanel {
         }
     }
     
-    private void searchCompany() {
-        String searchText = companyNameField.getText().trim().toLowerCase();
-        
-        if (searchText.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Arama için firma adı yazın.", "Uyarı", JOptionPane.WARNING_MESSAGE);
+    private void triggerCompanySearch() {
+        if (skipNextCompanySearch) {
+            skipNextCompanySearch = false;
+            hideCompanyPopup();
             return;
         }
-        
-        // Find matching companies
-        List<String> matches = new ArrayList<>();
-        for (Customer customer : customerList) {
-            if (customer.getCompanyName().toLowerCase().contains(searchText)) {
-                matches.add(customer.getCompanyName());
-            }
-        }
-        
-        if (matches.isEmpty()) {
-            JOptionPane.showMessageDialog(this, 
-                "Bu isimle firma bulunamadı: " + companyNameField.getText(), 
-                "Firma Bulunamadı", JOptionPane.INFORMATION_MESSAGE);
+        String term = companyNameField.getText().trim();
+        if (term.length() < 2) {
+            hideCompanyPopup();
+            if (currentInvoice != null) currentInvoice.setCompanyId(null);
             return;
         }
-        
-        if (matches.size() == 1) {
-            // Only one match, auto-fill
-            companyNameField.setText(matches.get(0));
-            JOptionPane.showMessageDialog(this, 
-                "Firma bulundu: " + matches.get(0), 
-                "Firma Bulundu", JOptionPane.INFORMATION_MESSAGE);
-        } else {
-            // Multiple matches, show selection dialog
-            String[] options = matches.toArray(new String[0]);
-            String selected = (String) JOptionPane.showInputDialog(this,
-                "Birden fazla firma bulundu. Seçin:",
-                "Firma Seçimi",
-                JOptionPane.QUESTION_MESSAGE,
-                null,
-                options,
-                options[0]);
-            
-            if (selected != null) {
-                companyNameField.setText(selected);
+        if (currentInvoice != null) currentInvoice.setCompanyId(null);
+        new SwingWorker<List<Customer>, Void>() {
+            @Override
+            protected List<Customer> doInBackground() throws Exception {
+                return customerService.searchCustomersByCompanyName(term);
             }
-        }
+            @Override
+            protected void done() {
+                try {
+                    showCompanyPopup(get());
+                } catch (Exception e) {
+                    hideCompanyPopup();
+                }
+            }
+        }.execute();
     }
-    
+
+    private void showCompanyPopup(List<Customer> customers) {
+        if (customers == null || customers.isEmpty()) {
+            hideCompanyPopup();
+            return;
+        }
+        if (companyPopup == null) {
+            Window w = SwingUtilities.getWindowAncestor(companyNameField);
+            companyPopup = new JWindow(w);
+            companyPopup.getContentPane().add(new JScrollPane(companyList));
+            companyPopup.setFocusableWindowState(false);
+        }
+        companyListModel.clear();
+        for (Customer c : customers) companyListModel.addElement(c);
+        companyList.setSelectedIndex(0);
+        companyList.ensureIndexIsVisible(0);
+        companyPopup.pack();
+        companyPopup.setSize(Math.max(companyNameField.getWidth(), 200), Math.min(companyList.getPreferredSize().height + 20, 220));
+        companyPopup.setLocation(companyNameField.getLocationOnScreen().x, companyNameField.getLocationOnScreen().y + companyNameField.getHeight());
+        companyPopup.setVisible(true);
+        companyList.requestFocusInWindow();
+    }
+
+    private void hideCompanyPopup() {
+        if (companyPopup != null) companyPopup.setVisible(false);
+        companyNameField.requestFocusInWindow();
+    }
+
+    private void onCompanySelected(Customer c) {
+        companySearchTimer.stop();
+        skipNextCompanySearch = true;
+        companyNameField.setText(c.getCompanyName());
+        if (currentInvoice != null) {
+            currentInvoice.setCompanyName(c.getCompanyName());
+            currentInvoice.setCompanyId(c.getCustomerId());
+        }
+        hideCompanyPopup();
+    }
+
     private void addItemToInvoice() {
         String selectedProductName = (String) productComboBox.getSelectedItem();
         if (selectedProductName == null) {
@@ -493,15 +566,30 @@ public class InvoicePanel extends JPanel {
         item.setProductId(selectedProduct.getProductId());
         item.setProductName(selectedProduct.getProductName());
         item.setPrice(selectedProduct.getPrice());
-        item.setQuantity(quantity);
         item.setCmValue(cmValue);
         item.setProductCode(selectedProduct.getProductCode());
+        
+        int finalQuantity = quantity;
+        if (!"1".equals(selectedProduct.getProductCode())) {
+            int parentQuantity = 1;
+            for (int i = invoiceTableModel.getRowCount() - 1; i >= 0; i--) {
+                Object prevRowNumber = invoiceTableModel.getValueAt(i, 0);
+                if (prevRowNumber != null && !prevRowNumber.toString().isEmpty()) {
+                    try {
+                        parentQuantity = Integer.parseInt(invoiceTableModel.getValueAt(i, 5).toString());
+                    } catch (Exception ex) {
+                        parentQuantity = 1;
+                    }
+                    break;
+                }
+            }
+            finalQuantity = quantity * parentQuantity;
+        }
+        
+        item.setQuantity(finalQuantity);
         // Calculate total
         calculateItemTotal(item);
-        // --- Sıra numarası ve alt grup mantığı ---
         int anaGrupSira = 0;
-        int lastAnaGrupIndex = -1;
-        // Son eklenen ana grup (productCode=1) satırını bul
         for (int i = invoiceTableModel.getRowCount() - 1; i >= 0; i--) {
             String prevProductName = invoiceTableModel.getValueAt(i, 1).toString();
             Product prevProduct = null;
@@ -512,7 +600,6 @@ public class InvoicePanel extends JPanel {
                 }
             }
             if (prevProduct != null && "1".equals(prevProduct.getProductCode())) {
-                lastAnaGrupIndex = i;
                 break;
             }
         }
@@ -531,11 +618,9 @@ public class InvoicePanel extends JPanel {
             }
         }
         Object rowNumberToShow = null;
-        // Ana grup ise sıra numarası ver
         if ("1".equals(selectedProduct.getProductCode())) {
             rowNumberToShow = anaGrupSira + 1;
         } else {
-            // Alt grup ve diğer ürünler için sıra numarası boş
             rowNumberToShow = "";
         }
         // Add to table
@@ -546,6 +631,8 @@ public class InvoicePanel extends JPanel {
                 break;
             }
         }
+        
+        BigDecimal laborCost = BigDecimal.ZERO;
         invoiceTableModel.addRow(new Object[]{
             rowNumberToShow,
             item.getProductName(),
@@ -553,24 +640,21 @@ public class InvoicePanel extends JPanel {
             item.getPrice(),
             item.getCmValue(),
             item.getQuantity(),
+            laborCost,
             item.getTotal()
         });
-        // Clear input fields
         quantityField.setText("");
         cmField.setText("");
-        // Calculate totals
         calculateTotals();
     }
     
     private void calculateItemTotal(InvoiceItem item) {
         BigDecimal total;
         if (item.getCmValue() != null) {
-            // CM değeri varsa: fiyat * miktar * cm_value
             total = item.getPrice()
                     .multiply(BigDecimal.valueOf(item.getQuantity()))
                     .multiply(item.getCmValue());
         } else {
-            // CM değeri yoksa: fiyat * miktar
             total = item.getPrice()
                     .multiply(BigDecimal.valueOf(item.getQuantity()));
         }
@@ -585,12 +669,10 @@ public class InvoicePanel extends JPanel {
                 cmValue = new java.math.BigDecimal(invoiceTableModel.getValueAt(row, 4).toString());
             }
             int quantity = Integer.parseInt(invoiceTableModel.getValueAt(row, 5).toString());
-            // Alt grupsa üst grubun adedini bul
             Object rowNumber = invoiceTableModel.getValueAt(row, 0);
             boolean isSubGroup = (rowNumber == null || rowNumber.toString().isEmpty());
             int finalQuantity = quantity;
             if (isSubGroup) {
-                // En yakın üst grubu bul
                 int parentIndex = -1;
                 for (int i = row - 1; i >= 0; i--) {
                     Object parentRowNumber = invoiceTableModel.getValueAt(i, 0);
@@ -612,57 +694,114 @@ public class InvoicePanel extends JPanel {
             } else {
                 total = price.multiply(java.math.BigDecimal.valueOf(finalQuantity));
             }
-            invoiceTableModel.setValueAt(total, row, 6);
+            java.math.BigDecimal laborCost = parseLaborCostFromRow(row);
+            total = total.add(laborCost);
+            invoiceTableModel.setValueAt(total, row, 7);
             if (isSubGroup) {
                 invoiceTableModel.setValueAt(finalQuantity, row, 5);
             }
         } catch (Exception e) {
-            // Ignore calculation errors
+        }
+    }
+
+    private BigDecimal parseLaborCostFromRow(int row) {
+        Object laborValue = invoiceTableModel.getValueAt(row, 6);
+        if (laborValue == null) {
+            return BigDecimal.ZERO;
+        }
+        String laborStr = laborValue.toString()
+            .replace(",", ".")
+            .replace("TL", "")
+            .trim();
+        if (laborStr.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+        try {
+            return new BigDecimal(laborStr);
+        } catch (NumberFormatException ex) {
+            return BigDecimal.ZERO;
         }
     }
     
     private void calculateTotals() {
         BigDecimal totalAmount = BigDecimal.ZERO;
+        BigDecimal totalLaborCost = BigDecimal.ZERO;
         int totalQuantity = 0;
         
         for (int i = 0; i < invoiceTableModel.getRowCount(); i++) {
             try {
-                BigDecimal rowTotal = new BigDecimal(invoiceTableModel.getValueAt(i, 6).toString());
-                totalAmount = totalAmount.add(rowTotal);
+                String totalStr = invoiceTableModel.getValueAt(i, 7).toString().replace(",", ".");
+                BigDecimal rowTotal = new BigDecimal(totalStr);
                 
                 Object rowNumber = invoiceTableModel.getValueAt(i, 0);
+                BigDecimal rowLabor = BigDecimal.ZERO;
                 if (rowNumber != null && !rowNumber.toString().isEmpty()) {
                     int rowQuantity = Integer.parseInt(invoiceTableModel.getValueAt(i, 5).toString());
                     totalQuantity += rowQuantity;
+                    
+                    Object laborValue = invoiceTableModel.getValueAt(i, 6);
+                    if (laborValue != null && !laborValue.toString().isEmpty()) {
+                        try {
+                            String laborStr = laborValue.toString()
+                                .replace(",", ".")
+                                .replace("TL", "")
+                                .trim();
+                            rowLabor = new BigDecimal(laborStr);
+                            totalLaborCost = totalLaborCost.add(rowLabor);
+                        } catch (NumberFormatException ex) {
+                        }
+                    }
                 }
+                totalAmount = totalAmount.add(rowTotal.subtract(rowLabor));
             } catch (Exception e) {
-                // Ignore invalid values
             }
         }
         
         totalAmountLabel.setText(String.format("%.2f TL", totalAmount));
         totalQuantityLabel.setText(String.valueOf(totalQuantity));
         
-        // Calculate final amount
         BigDecimal discountAmount = BigDecimal.ZERO;
+        BigDecimal discountPercentage = BigDecimal.ZERO;
+        
         try {
-            if (!discountField.getText().trim().isEmpty()) {
-                discountAmount = new BigDecimal(discountField.getText().trim());
+            String percentText = discountPercentageField.getText().trim().replace(",", ".");
+            if (!percentText.isEmpty()) {
+                discountPercentage = new BigDecimal(percentText);
+                if (totalAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    discountAmount = totalAmount.multiply(discountPercentage)
+                                        .divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP);
+                    discountField.setText(String.format("%.2f", discountAmount));
+                }
+            } else {
+                discountPercentageField.setText("0");
+            }
+        } catch (NumberFormatException e) {
+            discountPercentageField.setText("0");
+        }
+        
+        try {
+            String amountText = discountField.getText().trim().replace(",", ".");
+            if (!amountText.isEmpty()) {
+                BigDecimal directAmount = new BigDecimal(amountText);
+                if (totalAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    BigDecimal calculatedPercent = directAmount.multiply(BigDecimal.valueOf(100))
+                                                    .divide(totalAmount, 2, java.math.RoundingMode.HALF_UP);
+                    if (!calculatedPercent.equals(discountPercentage)) {
+                        discountPercentageField.setText(String.format("%.2f", calculatedPercent));
+                    }
+                }
+                discountAmount = directAmount;
+            } else {
+                discountField.setText("0.00");
             }
         } catch (NumberFormatException e) {
             discountField.setText("0.00");
         }
 
-        BigDecimal laborCostAmount = BigDecimal.ZERO;
-        try {
-            if (!laborCostField.getText().trim().isEmpty()) {
-                laborCostAmount = new BigDecimal(laborCostField.getText().trim());
-            }
-        } catch (NumberFormatException e) {
-            laborCostField.setText("0.00");
-        }
+        laborCostField.setText(String.format("%.2f", totalLaborCost));
+        laborCostField.setEditable(false);
         
-        BigDecimal finalAmount = totalAmount.subtract(discountAmount).add(laborCostAmount);
+        BigDecimal finalAmount = totalAmount.subtract(discountAmount).add(totalLaborCost);
         finalAmountLabel.setText(String.format("%.2f TL", finalAmount));
     }
     
@@ -670,10 +809,26 @@ public class InvoicePanel extends JPanel {
         int selectedRow = invoiceTable.getSelectedRow();
         if (selectedRow >= 0) {
             invoiceTableModel.removeRow(selectedRow);
-            // Update row numbers
+            
+            // Recalculate row numbers for main groups only
+            int mainGroupSeq = 0;
             for (int i = 0; i < invoiceTableModel.getRowCount(); i++) {
-                invoiceTableModel.setValueAt(i + 1, i, 0);
+                String productName = invoiceTableModel.getValueAt(i, 1).toString();
+                Product product = null;
+                for (Product p : productList) {
+                    if (p.getProductName().equals(productName)) {
+                        product = p;
+                        break;
+                    }
+                }
+                if (product != null && "1".equals(product.getProductCode())) {
+                    mainGroupSeq++;
+                    invoiceTableModel.setValueAt(mainGroupSeq, i, 0);
+                } else {
+                    invoiceTableModel.setValueAt("", i, 0);
+                }
             }
+            
             calculateTotals();
         } else {
             JOptionPane.showMessageDialog(this, "Lütfen silmek için bir satır seçin.", "Uyarı", JOptionPane.WARNING_MESSAGE);
@@ -721,7 +876,7 @@ public class InvoicePanel extends JPanel {
                     multiplier = BigDecimal.ONE.subtract(BigDecimal.valueOf(percentage).divide(BigDecimal.valueOf(100)));
                 }
                 
-                BigDecimal newPrice = currentPrice.multiply(multiplier).setScale(2, BigDecimal.ROUND_HALF_UP);
+                BigDecimal newPrice = currentPrice.multiply(multiplier).setScale(2, java.math.RoundingMode.HALF_UP);
                 
                 // Update price in table
                 invoiceTableModel.setValueAt(newPrice, row, 3);
@@ -747,29 +902,26 @@ public class InvoicePanel extends JPanel {
     
     private void newInvoice() {
         currentInvoice = new Invoice();
-        invoiceItems = new ArrayList<>();
         invoiceTableModel.setRowCount(0);
-        companyNameField.setText("");  // companyNameComboBox yerine
+        companyNameField.setText("");
         qualityField.setText("");
+        discountPercentageField.setText("0");
         discountField.setText("0.00");
         laborCostField.setText("0.00");
         calculateTotals();
     }
     
     private String generateInvoiceNumber() {
-        // Generate invoice number based on current date and daily sequence
         java.time.LocalDateTime now = java.time.LocalDateTime.now();
         java.time.format.DateTimeFormatter dateFormatter = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd");
         String dateStr = now.format(dateFormatter);
         
         try {
-            // Get next daily sequence number from database
             int sequence = invoiceService.getNextDailySequence(dateStr);
             System.out.println("Generated sequence: " + sequence + " for date: " + dateStr);
             return String.format("FTR-%s-%03d", dateStr, sequence);
         } catch (SQLException e) {
             System.err.println("Error getting sequence: " + e.getMessage());
-            // Fallback: use current time if database error
             java.time.format.DateTimeFormatter timeFormatter = java.time.format.DateTimeFormatter.ofPattern("HHmm");
             String timeStr = now.format(timeFormatter);
             int sequence = Integer.parseInt(timeStr);
@@ -780,7 +932,6 @@ public class InvoicePanel extends JPanel {
     
     private void saveInvoice() {
         try {
-            // Get company name from text field
             String companyName = companyNameField.getText().trim();
             
             if (companyName.isEmpty()) {
@@ -788,10 +939,7 @@ public class InvoicePanel extends JPanel {
                 return;
             }
             
-            // Check if company exists in database
-            boolean companyExists = customerList.stream()
-                .anyMatch(customer -> customer.getCompanyName().equalsIgnoreCase(companyName));
-            
+            boolean companyExists = customerService.isCompanyNameExists(companyName);
             if (!companyExists) {
                 int result = JOptionPane.showConfirmDialog(this, 
                     "Bu firma adı veritabanında bulunmuyor. Yine de devam etmek istiyor musunuz?\n\nFirma: " + companyName, 
@@ -807,49 +955,76 @@ public class InvoicePanel extends JPanel {
                 return;
             }
             
-            // Generate invoice number
             String invoiceNumber = generateInvoiceNumber();
             
-            // Create invoice
             currentInvoice.setInvoiceNumber(invoiceNumber);
             currentInvoice.setCompanyName(companyName);
             currentInvoice.setQuality(qualityField.getText().trim());
-            currentInvoice.setCreatedBy("User"); // TODO: Get actual user
+            currentInvoice.setCreatedBy("User");
             
-            // Calculate totals
             BigDecimal totalAmount = BigDecimal.ZERO;
             int totalQuantity = 0;
             for (int i = 0; i < invoiceTableModel.getRowCount(); i++) {
-                BigDecimal rowTotal = new BigDecimal(invoiceTableModel.getValueAt(i, 6).toString());
-                totalAmount = totalAmount.add(rowTotal);
-                
-                int rowQuantity = Integer.parseInt(invoiceTableModel.getValueAt(i, 5).toString());
-                totalQuantity += rowQuantity;
+                try {
+                    String totalStr = invoiceTableModel.getValueAt(i, 7).toString()
+                        .replace(",", ".")
+                        .replace("TL", "")
+                        .trim();
+                    BigDecimal rowTotal = new BigDecimal(totalStr);
+                    
+                    Object rowNumber = invoiceTableModel.getValueAt(i, 0);
+                    BigDecimal rowLabor = BigDecimal.ZERO;
+                    if (rowNumber != null && !rowNumber.toString().isEmpty()) {
+                        int rowQuantity = Integer.parseInt(invoiceTableModel.getValueAt(i, 5).toString());
+                        totalQuantity += rowQuantity;
+                        rowLabor = parseLaborCostFromRow(i);
+                    }
+                    totalAmount = totalAmount.add(rowTotal.subtract(rowLabor));
+                } catch (Exception e) {
+                }
+            }
+            
+            BigDecimal discountPercentage = BigDecimal.ZERO;
+            if (!discountPercentageField.getText().trim().isEmpty()) {
+                try {
+                    String text = discountPercentageField.getText().trim().replace(",", ".");
+                    discountPercentage = new BigDecimal(text);
+                } catch (NumberFormatException e) {
+                    discountPercentage = BigDecimal.ZERO;
+                }
             }
             
             BigDecimal discountAmount = BigDecimal.ZERO;
             if (!discountField.getText().trim().isEmpty()) {
-                discountAmount = new BigDecimal(discountField.getText().trim());
+                try {
+                    String text = discountField.getText().trim().replace(",", ".");
+                    discountAmount = new BigDecimal(text);
+                } catch (NumberFormatException e) {
+                    discountAmount = BigDecimal.ZERO;
+                }
             }
 
             BigDecimal laborCostAmount = BigDecimal.ZERO;
             if (!laborCostField.getText().trim().isEmpty()) {
-                laborCostAmount = new BigDecimal(laborCostField.getText().trim());
+                try {
+                    String text = laborCostField.getText().trim().replace(",", ".");
+                    laborCostAmount = new BigDecimal(text);
+                } catch (NumberFormatException e) {
+                    laborCostAmount = BigDecimal.ZERO;
+                }
             }
             
             currentInvoice.setTotalAmount(totalAmount);
+            currentInvoice.setDiscountPercentage(discountPercentage);
             currentInvoice.setDiscountAmount(discountAmount);
             currentInvoice.setLaborCostAmount(laborCostAmount);
             currentInvoice.setTotalQuantity(totalQuantity);
             
-            // Save invoice
             Invoice savedInvoice = invoiceService.createInvoice(currentInvoice);
             
-            // Save invoice items
             for (int i = 0; i < invoiceTableModel.getRowCount(); i++) {
                 InvoiceItem item = new InvoiceItem();
                 item.setInvoiceId(savedInvoice.getInvoiceId());
-                // Find product by name
                 String productName = invoiceTableModel.getValueAt(i, 1).toString();
                 Product selectedProduct = null;
                 for (Product product : productList) {
@@ -859,7 +1034,6 @@ public class InvoicePanel extends JPanel {
                         break;
                     }
                 }
-                // Set subGroup based on product code
                 if (selectedProduct != null) {
                     if (!"1".equals(selectedProduct.getProductCode())) {
                         item.setSubGroup(true);
@@ -867,15 +1041,35 @@ public class InvoicePanel extends JPanel {
                         item.setSubGroup(false);
                     }
                 }
-                // Set other values from table (not from product)
                 if (invoiceTableModel.getValueAt(i, 3) != null && !invoiceTableModel.getValueAt(i, 3).toString().isEmpty()) {
-                    item.setPrice(new BigDecimal(invoiceTableModel.getValueAt(i, 3).toString()));
+                    String priceStr = invoiceTableModel.getValueAt(i, 3).toString().replace(",", ".");
+                    item.setPrice(new BigDecimal(priceStr));
                 }
                 if (invoiceTableModel.getValueAt(i, 4) != null && !invoiceTableModel.getValueAt(i, 4).toString().isEmpty()) {
-                    item.setCmValue(new BigDecimal(invoiceTableModel.getValueAt(i, 4).toString()));
+                    String cmStr = invoiceTableModel.getValueAt(i, 4).toString().replace(",", ".");
+                    item.setCmValue(new BigDecimal(cmStr));
                 }
                 item.setQuantity(Integer.parseInt(invoiceTableModel.getValueAt(i, 5).toString()));
-                item.setTotal(new BigDecimal(invoiceTableModel.getValueAt(i, 6).toString()));
+                
+                if (invoiceTableModel.getValueAt(i, 6) != null && !invoiceTableModel.getValueAt(i, 6).toString().isEmpty()) {
+                    try {
+                        String laborStr = invoiceTableModel.getValueAt(i, 6).toString().replace(",", ".").replace("TL", "").trim();
+                        item.setLaborCost(new BigDecimal(laborStr));
+                    } catch (NumberFormatException e) {
+                        item.setLaborCost(BigDecimal.ZERO);
+                    }
+                } else {
+                    item.setLaborCost(BigDecimal.ZERO);
+                }
+                
+                String totalStr = invoiceTableModel.getValueAt(i, 7).toString().replace(",", ".").replace("TL", "").trim();
+                BigDecimal displayedTotal = new BigDecimal(totalStr);
+                BigDecimal rowLabor = BigDecimal.ZERO;
+                Object rowNumber = invoiceTableModel.getValueAt(i, 0);
+                if (rowNumber != null && !rowNumber.toString().isEmpty()) {
+                    rowLabor = parseLaborCostFromRow(i);
+                }
+                item.setTotal(displayedTotal.subtract(rowLabor));
                 item.setRowNumber(i + 1);
                 invoiceItemService.createInvoiceItem(item);
             }
@@ -892,7 +1086,6 @@ public class InvoicePanel extends JPanel {
     }
 
     // --- FAVORITE PANEL SYNCHRONIZATION ---
-    // Static reference for cross-panel refresh
     private static java.util.List<FavoritePanel> favoritePanelObservers = new java.util.ArrayList<>();
     static void registerFavoritePanel(FavoritePanel panel) {
         if (!favoritePanelObservers.contains(panel)) favoritePanelObservers.add(panel);
@@ -906,14 +1099,11 @@ public class InvoicePanel extends JPanel {
         favoritePanel.refresh();
     }
 
-    // Add this method to handle adding a product from favorites
     public void addProductToInvoice(Product product) {
-        // 1. Find all main group rows (Çelik, product_code=1) in the current invoice table
         java.util.List<String> mainGroups = new java.util.ArrayList<>();
         java.util.List<Integer> mainGroupQuantities = new java.util.ArrayList<>();
         for (int i = 0; i < invoiceTableModel.getRowCount(); i++) {
             Object productName = invoiceTableModel.getValueAt(i, 1);
-            Object category = invoiceTableModel.getValueAt(i, 2);
             Object productCode = null;
             for (Product p : productList) {
                 if (p.getProductName().equals(productName)) {
@@ -928,7 +1118,6 @@ public class InvoicePanel extends JPanel {
                 } catch (Exception e) { mainGroupQuantities.add(1); }
             }
         }
-        // 2. Show dialog for group selection and quantity/cm
         JPanel panel = new JPanel(new GridLayout(0, 2, 5, 5));
         panel.add(new JLabel("Adet:"));
         JTextField quantityField = new JTextField("1");
@@ -950,14 +1139,12 @@ public class InvoicePanel extends JPanel {
             try { quantity = Integer.parseInt(quantityField.getText().trim()); } catch (Exception e) {}
             java.math.BigDecimal cmValue = null;
             try { String cmText = cmField.getText().trim(); if (!cmText.isEmpty()) cmValue = new java.math.BigDecimal(cmText); } catch (Exception e) {}
-            // Determine if this is a sub-group or main group
             boolean isSubGroup = false;
             int parentGroupIndex = -1;
             if (groupCombo != null && groupCombo.getSelectedIndex() < groupCombo.getItemCount() - 1) {
                 isSubGroup = true;
                 parentGroupIndex = groupCombo.getSelectedIndex();
             }
-            // Add to invoice table
             String categoryName = "";
             for (Category cat : categoryList) {
                 if (cat.getCategoryId() == product.getCategoryId()) {
@@ -965,13 +1152,32 @@ public class InvoicePanel extends JPanel {
                     break;
                 }
             }
-            Object rowNumberToShow = invoiceTableModel.getRowCount() + 1;
-            if (isSubGroup) rowNumberToShow = "";
+            
+            Object rowNumberToShow;
+            if (isSubGroup) {
+                rowNumberToShow = "";
+            } else {
+                int mainGroupSeq = 0;
+                for (int i = 0; i < invoiceTableModel.getRowCount(); i++) {
+                    String prevProductName = invoiceTableModel.getValueAt(i, 1).toString();
+                    Product prevProduct = null;
+                    for (Product p : productList) {
+                        if (p.getProductName().equals(prevProductName)) {
+                            prevProduct = p;
+                            break;
+                        }
+                    }
+                    if (prevProduct != null && "1".equals(prevProduct.getProductCode())) {
+                        mainGroupSeq++;
+                    }
+                }
+                rowNumberToShow = mainGroupSeq + 1;
+            }
+            
             java.math.BigDecimal price = product.getPrice();
             java.math.BigDecimal total;
             int finalQuantity = quantity;
             if (isSubGroup && parentGroupIndex >= 0) {
-                // Alt grup: üst grubun adedi ile çarp
                 int parentQuantity = mainGroupQuantities.get(parentGroupIndex);
                 finalQuantity = parentQuantity * quantity;
                 if (cmValue != null) {
@@ -980,13 +1186,14 @@ public class InvoicePanel extends JPanel {
                     total = price.multiply(java.math.BigDecimal.valueOf(finalQuantity));
                 }
             } else {
-                // Ana grup veya bağımsız ürün
                 if (cmValue != null) {
                     total = price.multiply(java.math.BigDecimal.valueOf(quantity)).multiply(cmValue);
                 } else {
                     total = price.multiply(java.math.BigDecimal.valueOf(quantity));
                 }
             }
+            
+            java.math.BigDecimal laborCost = java.math.BigDecimal.ZERO;
             invoiceTableModel.addRow(new Object[]{
                 rowNumberToShow,
                 product.getProductName(),
@@ -994,6 +1201,7 @@ public class InvoicePanel extends JPanel {
                 price,
                 cmValue,
                 finalQuantity,
+                laborCost,
                 total
             });
             calculateTotals();

@@ -18,8 +18,8 @@ public class InvoiceItemDAO {
     
     public InvoiceItem create(InvoiceItem item) throws SQLException {
         String sql = "INSERT INTO invoice_items (invoice_id, product_id, parent_item_id, price, " +
-                    "cm_value, quantity, total, is_sub_group, row_number, created_date) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    "cm_value, quantity, total, is_sub_group, row_number, labor_cost, created_date) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                     
         try (PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setInt(1, item.getInvoiceId());
@@ -43,7 +43,14 @@ public class InvoiceItemDAO {
             stmt.setBigDecimal(7, item.getTotal());
             stmt.setBoolean(8, item.isSubGroup());
             stmt.setInt(9, item.getRowNumber());
-            stmt.setTimestamp(10, Timestamp.valueOf(LocalDateTime.now()));
+            
+            if (item.getLaborCost() != null) {
+                stmt.setBigDecimal(10, item.getLaborCost());
+            } else {
+                stmt.setNull(10, Types.DECIMAL);
+            }
+            
+            stmt.setTimestamp(11, Timestamp.valueOf(LocalDateTime.now()));
             
             int affectedRows = stmt.executeUpdate();
             if (affectedRows == 0) {
@@ -114,7 +121,7 @@ public class InvoiceItemDAO {
     
     public void update(InvoiceItem item) throws SQLException {
         String sql = "UPDATE invoice_items SET invoice_id = ?, product_id = ?, parent_item_id = ?, " +
-                    "price = ?, cm_value = ?, quantity = ?, total = ?, is_sub_group = ?, row_number = ? " +
+                    "price = ?, cm_value = ?, quantity = ?, total = ?, is_sub_group = ?, row_number = ?, labor_cost = ? " +
                     "WHERE item_id = ?";
                     
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
@@ -139,7 +146,14 @@ public class InvoiceItemDAO {
             stmt.setBigDecimal(7, item.getTotal());
             stmt.setBoolean(8, item.isSubGroup());
             stmt.setInt(9, item.getRowNumber());
-            stmt.setInt(10, item.getItemId());
+            
+            if (item.getLaborCost() != null) {
+                stmt.setBigDecimal(10, item.getLaborCost());
+            } else {
+                stmt.setNull(10, Types.DECIMAL);
+            }
+            
+            stmt.setInt(11, item.getItemId());
             
             stmt.executeUpdate();
         }
@@ -185,6 +199,12 @@ public class InvoiceItemDAO {
         item.setTotal(rs.getBigDecimal("total"));
         item.setSubGroup(rs.getBoolean("is_sub_group"));
         item.setRowNumber(rs.getInt("row_number"));
+        
+        BigDecimal laborCost = rs.getBigDecimal("labor_cost");
+        if (laborCost != null) {
+            item.setLaborCost(laborCost);
+        }
+        
         item.setCreatedDate(rs.getTimestamp("created_date").toLocalDateTime());
         
         return item;

@@ -1,6 +1,7 @@
 package com.bicakclc.model;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -13,6 +14,7 @@ public class Invoice {
     private LocalDateTime invoiceDate;
     private String quality;
     private BigDecimal totalAmount;
+    private BigDecimal discountPercentage;
     private BigDecimal discountAmount;
     private BigDecimal laborCostAmount;
     private BigDecimal finalAmount;
@@ -30,6 +32,7 @@ public class Invoice {
         this.invoiceDate = LocalDateTime.now();
         this.status = "DRAFT";
         this.totalAmount = BigDecimal.ZERO;
+        this.discountPercentage = BigDecimal.ZERO;
         this.discountAmount = BigDecimal.ZERO;
         this.laborCostAmount = BigDecimal.ZERO;
         this.finalAmount = BigDecimal.ZERO;
@@ -98,6 +101,19 @@ public class Invoice {
     public void setTotalAmount(BigDecimal totalAmount) {
         this.totalAmount = totalAmount;
         calculateFinalAmount();
+    }
+
+    public BigDecimal getDiscountPercentage() {
+        return discountPercentage;
+    }
+
+    public void setDiscountPercentage(BigDecimal discountPercentage) {
+        this.discountPercentage = discountPercentage;
+        if (this.totalAmount != null && discountPercentage != null) {
+            this.discountAmount = totalAmount.multiply(discountPercentage)
+                                    .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            calculateFinalAmount();
+        }
     }
 
     public BigDecimal getDiscountAmount() {

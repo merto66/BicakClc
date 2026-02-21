@@ -18,9 +18,9 @@ public class InvoiceDAO {
     
     public Invoice create(Invoice invoice) throws SQLException {
         String sql = "INSERT INTO invoices (invoice_number, company_name, company_id, invoice_date, " +
-                    "quality, total_amount, discount_amount, labor_cost_amount, final_amount, total_quantity, notes, status, " +
+                    "quality, total_amount, discount_percentage, discount_amount, labor_cost_amount, final_amount, total_quantity, notes, status, " +
                     "created_date, created_by) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                     
         try (PreparedStatement stmt = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             stmt.setString(1, invoice.getInvoiceNumber());
@@ -33,14 +33,15 @@ public class InvoiceDAO {
             stmt.setTimestamp(4, Timestamp.valueOf(invoice.getInvoiceDate()));
             stmt.setString(5, invoice.getQuality());
             stmt.setBigDecimal(6, invoice.getTotalAmount());
-            stmt.setBigDecimal(7, invoice.getDiscountAmount());
-            stmt.setBigDecimal(8, invoice.getLaborCostAmount());
-            stmt.setBigDecimal(9, invoice.getFinalAmount());
-            stmt.setInt(10, invoice.getTotalQuantity());
-            stmt.setString(11, invoice.getNotes());
-            stmt.setString(12, invoice.getStatus());
-            stmt.setTimestamp(13, Timestamp.valueOf(LocalDateTime.now()));
-            stmt.setString(14, invoice.getCreatedBy());
+            stmt.setBigDecimal(7, invoice.getDiscountPercentage());
+            stmt.setBigDecimal(8, invoice.getDiscountAmount());
+            stmt.setBigDecimal(9, invoice.getLaborCostAmount());
+            stmt.setBigDecimal(10, invoice.getFinalAmount());
+            stmt.setInt(11, invoice.getTotalQuantity());
+            stmt.setString(12, invoice.getNotes());
+            stmt.setString(13, invoice.getStatus());
+            stmt.setTimestamp(14, Timestamp.valueOf(LocalDateTime.now()));
+            stmt.setString(15, invoice.getCreatedBy());
             
             int affectedRows = stmt.executeUpdate();
             if (affectedRows == 0) {
@@ -108,7 +109,7 @@ public class InvoiceDAO {
     
     public void update(Invoice invoice) throws SQLException {
         String sql = "UPDATE invoices SET invoice_number = ?, company_name = ?, company_id = ?, " +
-                    "invoice_date = ?, quality = ?, total_amount = ?, discount_amount = ?, " +
+                    "invoice_date = ?, quality = ?, total_amount = ?, discount_percentage = ?, discount_amount = ?, " +
                     "labor_cost_amount = ?, final_amount = ?, total_quantity = ?, notes = ?, status = ?, modified_date = ?, modified_by = ? " +
                     "WHERE invoice_id = ?";
                     
@@ -123,15 +124,16 @@ public class InvoiceDAO {
             stmt.setTimestamp(4, Timestamp.valueOf(invoice.getInvoiceDate()));
             stmt.setString(5, invoice.getQuality());
             stmt.setBigDecimal(6, invoice.getTotalAmount());
-            stmt.setBigDecimal(7, invoice.getDiscountAmount());
-            stmt.setBigDecimal(8, invoice.getLaborCostAmount());
-            stmt.setBigDecimal(9, invoice.getFinalAmount());
-            stmt.setInt(10, invoice.getTotalQuantity());
-            stmt.setString(11, invoice.getNotes());
-            stmt.setString(12, invoice.getStatus());
-            stmt.setTimestamp(13, Timestamp.valueOf(LocalDateTime.now()));
-            stmt.setString(14, invoice.getModifiedBy());
-            stmt.setInt(15, invoice.getInvoiceId());
+            stmt.setBigDecimal(7, invoice.getDiscountPercentage());
+            stmt.setBigDecimal(8, invoice.getDiscountAmount());
+            stmt.setBigDecimal(9, invoice.getLaborCostAmount());
+            stmt.setBigDecimal(10, invoice.getFinalAmount());
+            stmt.setInt(11, invoice.getTotalQuantity());
+            stmt.setString(12, invoice.getNotes());
+            stmt.setString(13, invoice.getStatus());
+            stmt.setTimestamp(14, Timestamp.valueOf(LocalDateTime.now()));
+            stmt.setString(15, invoice.getModifiedBy());
+            stmt.setInt(16, invoice.getInvoiceId());
             
             stmt.executeUpdate();
         }
@@ -196,6 +198,7 @@ public class InvoiceDAO {
         invoice.setInvoiceDate(rs.getTimestamp("invoice_date").toLocalDateTime());
         invoice.setQuality(rs.getString("quality"));
         invoice.setTotalAmount(rs.getBigDecimal("total_amount"));
+        invoice.setDiscountPercentage(rs.getBigDecimal("discount_percentage"));
         invoice.setDiscountAmount(rs.getBigDecimal("discount_amount"));
         invoice.setLaborCostAmount(rs.getBigDecimal("labor_cost_amount"));
         invoice.setFinalAmount(rs.getBigDecimal("final_amount"));

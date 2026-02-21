@@ -14,16 +14,17 @@ public class InvoiceItem {
     private BigDecimal total;
     private boolean subGroup;
     private Integer rowNumber;
+    private BigDecimal laborCost;
     private LocalDateTime createdDate;
     
-    // Ürün bilgileri (veritabanında yok, gösterim için)
+    // Product information (not in database, for display purposes)
     private String productName;
     private String productCode;
     private String unit;
     
     public InvoiceItem() {
-        this.quantity = 1; // Varsayılan miktar
-        this.subGroup = false; // Varsayılan olarak alt grup değil
+        this.quantity = 1;
+        this.subGroup = false;
     }
     
     // Getters and Setters
@@ -137,6 +138,14 @@ public class InvoiceItem {
     
     public void setUnit(String unit) {
         this.unit = unit;
+    }
+    
+    public BigDecimal getLaborCost() {
+        return laborCost;
+    }
+    
+    public void setLaborCost(BigDecimal laborCost) {
+        this.laborCost = laborCost;
     }
     
     // Helper methods

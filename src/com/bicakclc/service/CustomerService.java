@@ -42,6 +42,14 @@ public class CustomerService {
         }
         return customerDAO.searchCustomers(searchTerm.trim());
     }
+
+    public List<Customer> searchCustomersByCompanyName(String searchTerm) throws SQLException {
+        return customerDAO.searchCustomersByCompanyName(searchTerm == null ? "" : searchTerm.trim(), 15);
+    }
+
+    public boolean isCompanyNameExists(String companyName) throws SQLException {
+        return companyName != null && !companyName.trim().isEmpty() && customerDAO.isCompanyNameExists(companyName.trim(), 0);
+    }
     
     public void updateCustomer(Customer customer) throws SQLException {
         // Validation

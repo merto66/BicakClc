@@ -3,11 +3,15 @@ CREATE TABLE [dbo].[invoices](
     [invoice_id] [int] IDENTITY(1,1) NOT NULL,
     [invoice_number] [nvarchar](50) NOT NULL,  -- Fatura numarası
     [company_name] [nvarchar](200) NOT NULL,  -- Firma adı (geçici olarak direkt tabloda tutulacak)
+    [company_id] [int] NULL,  -- Müşteri referansı (opsiyonel)
     [invoice_date] [datetime2](7) NOT NULL,
     [quality] [nvarchar](100) NULL,  -- Kalite bilgisi
     [total_amount] [decimal](15, 2) NOT NULL DEFAULT(0),
     [discount_percentage] [decimal](5, 2) NOT NULL DEFAULT(0),
+    [discount_amount] [decimal](15, 2) NOT NULL DEFAULT(0),
+    [labor_cost_amount] [decimal](15, 2) NOT NULL DEFAULT(0),
     [final_amount] [decimal](15, 2) NOT NULL DEFAULT(0),
+    [total_quantity] [int] NOT NULL DEFAULT(0),
     [notes] [nvarchar](500) NULL,  -- Ek notlar için
     [status] [nvarchar](20) NOT NULL DEFAULT('DRAFT'),  -- DRAFT, APPROVED, CANCELLED gibi
     [created_date] [datetime2](7) NOT NULL DEFAULT(getdate()),
